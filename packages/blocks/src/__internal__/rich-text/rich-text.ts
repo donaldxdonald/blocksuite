@@ -9,6 +9,7 @@ import { createKeyboardBindings } from './keyboard.js';
 
 import Syntax from '../../code-block/components/syntax-code-block.js';
 import { NonShadowLitElement } from '../utils/lit.js';
+import type { LeafBlot, TextBlot } from 'parchment';
 
 Quill.register('modules/cursors', QuillCursors, true);
 const Clipboard = Quill.import('modules/clipboard');
@@ -130,56 +131,61 @@ export class RichText extends NonShadowLitElement {
     // If you type a character after the code or link node,
     // the character should not be inserted into the code or link node.
     // So we check and remove the corresponding format manually.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.quill.on('text-change', (delta: any) => {
+    this.quill.on('text-change', delta => {
+      if (!delta.ops || delta.ops.length <= 1) {
+        return;
+      }
       const selectorMap = {
         code: 'code',
         link: 'link-node',
       } as const;
       let attr: keyof typeof selectorMap | null = null;
-      if (delta.ops[1]?.attributes?.code) {
+      const [retainOp, insertOp] = delta.ops;
+
+      if (insertOp.attributes?.code) {
         attr = 'code';
       }
-      if (delta.ops[1]?.attributes?.link) {
+      if (insertOp.attributes?.link) {
         attr = 'link';
       }
-      // only length is 2 need to be handled
-      if (delta.ops.length === 2 && delta.ops[1]?.insert && attr) {
-        const retain = delta.ops[0].retain;
-        const selector = selectorMap[attr];
-        if (retain !== undefined) {
-          const currentLeaf = this.quill.getLeaf(
-            retain + Number(delta.ops[1]?.insert.toString().length)
-          );
-          const nextLeaf = this.quill.getLeaf(
-            retain + Number(delta.ops[1]?.insert.toString().length) + 1
-          );
-          const currentParentElement = currentLeaf[0]?.domNode?.parentElement;
-          const currentEmbedElement = currentParentElement?.closest(selector);
-          const nextParentElement = nextLeaf[0]?.domNode?.parentElement;
-          const nextEmbedElement = nextParentElement?.closest(selector);
-          const insertedString = delta.ops[1]?.insert.toString();
 
-          // if insert to the same node, no need to handle
-          // For example,
-          // `inline |code`
-          //         ⬆️ should not remove format when insert to inside the format
-          if (
-            // At the end of the node, need to remove format
-            !nextEmbedElement ||
-            // At the edge of the node, need to remove format
-            nextEmbedElement !== currentEmbedElement
-          ) {
-            model.text?.replace(
-              retain,
-              insertedString.length,
-              // @ts-expect-error
-              !this.host.isCompositionStart
-                ? delta.ops[1]?.insert.toString() || ''
-                : ' ',
-              { [attr]: false }
-            );
-          }
+      const { retain } = retainOp;
+
+      // only length is 2 need to be handled
+      if (attr && delta.ops.length === 2 && retain && insertOp.insert) {
+        const selector = selectorMap[attr];
+        const insertedString = insertOp.insert.toString();
+
+        const currentLeaf: [LeafBlot, number] = this.quill.getLeaf(
+          retain + Number(insertedString.length)
+        );
+        const nextLeaf: [LeafBlot, number] = this.quill.getLeaf(
+          retain + Number(insertedString.length) + 1
+        );
+        const currentParentElement = currentLeaf[0]?.domNode?.parentElement;
+        const currentEmbedElement = currentParentElement?.closest(selector);
+        const nextParentElement = nextLeaf[0]?.domNode?.parentElement;
+        const nextEmbedElement = nextParentElement?.closest(selector);
+
+        // if insert to the same node, no need to handle
+        // For example,
+        // `inline |code`
+        //         ⬆️ should not remove format when insert to inside the format
+        const isComposing =
+          'isCompositionStart' in this.host && !!this.host.isCompositionStart;
+        console.log('isComposing', isComposing);
+        if (
+          // At the end of the node, need to remove format
+          !nextEmbedElement ||
+          // At the edge of the node, need to remove format
+          nextEmbedElement !== currentEmbedElement
+        ) {
+          model.text?.replace(
+            retain,
+            insertedString.length,
+            insertedString || '',
+            { [attr]: false }
+          );
         }
       }
     });
