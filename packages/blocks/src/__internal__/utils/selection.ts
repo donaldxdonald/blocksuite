@@ -425,9 +425,21 @@ export function handleNativeRangeDragMove(
   startRange: Range | null,
   e: SelectionEvent
 ) {
-  const isDownward = e.y > e.start.y + MOVE_DETECT_THRESHOLD;
+  const rangeRects = startRange?.getClientRects() || [];
+  const isEmptyLine =
+    startRange && startRange.collapsed && rangeRects.length === 0;
+  const isMultiLine = rangeRects.length > 1;
+  const rangeOffset =
+    !isEmptyLine && startRange
+      ? startRange.startContainer.compareDocumentPosition(
+          startRange.endContainer
+        )
+      : -1;
+
+  const isDownward =
+    isMultiLine && rangeOffset === Node.DOCUMENT_POSITION_FOLLOWING;
   const isRightward = e.x > e.start.x;
-  const isForward = isDownward || (e.y === e.start.y && isRightward);
+  const isForward = isDownward || isRightward;
   assertExists(startRange);
   const { startContainer, startOffset, endContainer, endOffset } = startRange;
   let currentRange = caretRangeFromPoint(e.raw.clientX, e.raw.clientY);
